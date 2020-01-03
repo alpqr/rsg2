@@ -141,7 +141,18 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         camera_3d_properties: RSGCameraWorldTransformDerivedProperties,
         root_key: RSGNodeKey,
         layer3d_key: RSGNodeKey,
-        frame_count: u32
+        frame_count: u32,
+
+        // just for the tests's sake
+        tri1_key: RSGNodeKey,
+        tri2_key: RSGNodeKey,
+        tri3_key: RSGNodeKey,
+        tri_alpha1_key: RSGNodeKey,
+        tri_alpha2_key: RSGNodeKey,
+        tri_3d1_key: RSGNodeKey,
+        tri_3d2_key: RSGNodeKey,
+        tri_3d_alpha1_key: RSGNodeKey,
+        tri_3d_alpha2_key: RSGNodeKey,
     }
 
     fn sync(d: &mut Data, scene: &mut Scene) {
@@ -149,36 +160,36 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         if d.frame_count == 0 {
             let mut transaction = RSGSubtreeAddTransaction::new();
             // 2D, opaque
-            let tri1_key = scene.append_with_transaction(d.root_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri1_key = scene.append_with_transaction(d.root_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
                 &mut transaction);
-            let tri2_key = scene.append_with_transaction(tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri2_key = scene.append_with_transaction(d.tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(10.0, 20.0, 0.0)), 1.0),
                 &mut transaction);
-            scene.append_with_transaction(tri2_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri3_key = scene.append_with_transaction(d.tri2_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(-5.0, 0.0, 0.0)), 1.0),
                 &mut transaction);
             // 2D, alpha
-            let alpha1_key = scene.append_with_transaction(tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_alpha1_key = scene.append_with_transaction(d.tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(25.0, 32.0, 0.0)), 0.8),
                 &mut transaction);
-            scene.append_with_transaction(alpha1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_alpha2_key = scene.append_with_transaction(d.tri_alpha1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
                 &mut transaction);
             // throw in some 3D stuff, with a layer component only node acting as the "barrier"
-            d.layer3d_key = scene.append_with_transaction(alpha1_key,
+            d.layer3d_key = scene.append_with_transaction(d.tri_alpha1_key,
                 RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()),
                 &mut transaction);
-            let tri3d1_key = scene.append_with_transaction(d.layer3d_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_3d1_key = scene.append_with_transaction(d.layer3d_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(0.0, 0.0, -1.0)), 1.0),
                 &mut transaction);
-            scene.append_with_transaction(tri3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_3d2_key = scene.append_with_transaction(d.tri_3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(0.5, 0.5, -5.0)), 1.0),
                 &mut transaction);
-            let tri3d_alpha1_key = scene.append_with_transaction(tri3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_3d_alpha1_key = scene.append_with_transaction(d.tri_3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(-1.5, 0.0, -2.0)), 0.5),
                 &mut transaction);
-            scene.append_with_transaction(tri3d_alpha1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.tri_3d_alpha2_key = scene.append_with_transaction(d.tri_3d_alpha1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(0.0, 1.0, 1.0)), 0.2),
                 &mut transaction);
             scene.commit(transaction);
@@ -215,6 +226,24 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         println!("  3D camera={:?} {:?}", d.camera_3d, d.camera_3d_properties);
         println!("  3D opaque list={:?}", d.opaque_list_3d);
         println!("  3D alpha list={:?}", d.alpha_list_3d);
+
+        assert!(d.opaque_list_2d == vec![
+            (d.tri3_key, 2.0),
+            (d.tri2_key, 1.0),
+            (d.tri1_key, 0.0)
+        ]);
+        assert!(d.alpha_list_2d == vec![
+            (d.tri_alpha1_key, 3.0),
+            (d.tri_alpha2_key, 4.0),
+        ]);
+        assert!(d.opaque_list_3d == vec![
+            (d.tri_3d1_key, 601.0),
+            (d.tri_3d2_key, 606.0)
+        ]);
+        assert!(d.alpha_list_3d == vec![
+            (d.tri_3d_alpha1_key, 603.0),
+            (d.tri_3d_alpha2_key, 602.0),
+        ]);
     }
 
     fn frame(d: &mut Data, scene: &mut Scene, pool: &scoped_pool::Pool) {
