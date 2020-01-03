@@ -1,0 +1,14 @@
+[package]
+name = "rsg"
+version = "0.1.0"
+authors = ["Laszlo Agocs <lagocs83@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+slotmap = "0.4"
+smallvec = "1.0"
+bitflags = "1.2"
+nalgebra-glm = "0.5"
+scoped-pool = "1.0"
