@@ -140,6 +140,7 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         camera_3d: RSGCamera,
         camera_3d_properties: RSGCameraWorldTransformDerivedProperties,
         root_key: RSGNodeKey,
+        layer2d_key: RSGNodeKey,
         layer3d_key: RSGNodeKey,
         frame_count: u32,
 
@@ -160,7 +161,10 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         if d.frame_count == 0 {
             let mut transaction = RSGSubtreeAddTransaction::new();
             // 2D, opaque
-            d.tri1_key = scene.append_with_transaction(d.root_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
+            d.layer2d_key = scene.append_with_transaction(d.root_key,
+                RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()),
+                &mut transaction);
+            d.tri1_key = scene.append_with_transaction(d.layer2d_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
                 &mut transaction);
             d.tri2_key = scene.append_with_transaction(d.tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
@@ -176,7 +180,7 @@ fn scene_with_2d_first_plus_one_3d_layer() {
             d.tri_alpha2_key = scene.append_with_transaction(d.tri_alpha1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
                 glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
                 &mut transaction);
-            // throw in some 3D stuff, with a layer component only node acting as the "barrier"
+            // throw in some 3D stuff
             d.layer3d_key = scene.append_with_transaction(d.tri_alpha1_key,
                 RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()),
                 &mut transaction);
@@ -204,17 +208,29 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         }
     }
 
-    fn prepare(d: &mut Data, scene: &Scene, observer: &RSGSceneObserver, pool: &scoped_pool::Pool) {
-        println!("Frame {} prepare, changes={:?}", d.frame_count, observer);
+    fn update(components: &mut RSGComponentContainer, scene: &Scene, observer: &RSGSceneObserver,
+        layer_2d_key: RSGNodeKey, opaque_list_2d: &mut RSGRenderList, alpha_list_2d: &mut RSGRenderList,
+        layer_3d_key: RSGNodeKey, camera_3d_properties: RSGCameraWorldTransformDerivedProperties, opaque_list_3d: &mut RSGRenderList, alpha_list_3d: &mut RSGRenderList,
+        pool: &scoped_pool::Pool)
+    {
+        println!("Update scene, changes={:?}", observer);
         if observer.changed {
-            build_render_lists(&mut d.components, &scene, d.root_key, None,
-                &observer.dirty_world_roots, &observer.dirty_opacity_roots,
-                &mut d.opaque_list_2d, &mut d.alpha_list_2d,
-                &pool);
-            build_render_lists(&mut d.components, &scene, d.layer3d_key, Some(d.camera_3d_properties),
-                &[], &[],
-                &mut d.opaque_list_3d, &mut d.alpha_list_3d,
-                &pool);
+            update_inherited_properties(components, scene, &observer.dirty_world_roots, &observer.dirty_opacity_roots, &pool);
+            pool.scoped(|scope| {
+                let components_ref = &components;
+                let (two2d_tx, two2d_rx) = std::sync::mpsc::channel();
+                scope.execute(move || {
+                    build_layer_render_lists(components_ref, scene, layer_2d_key, None, opaque_list_2d, alpha_list_2d);
+                    two2d_tx.send(()).unwrap();
+                });
+                let (three3d_tx, three3d_rx) = std::sync::mpsc::channel();
+                scope.execute(move || {
+                    build_layer_render_lists(components_ref, scene, layer_3d_key, Some(camera_3d_properties), opaque_list_3d, alpha_list_3d);
+                    three3d_tx.send(()).unwrap();
+                });
+                two2d_rx.recv().unwrap();
+                three3d_rx.recv().unwrap();
+            });
         }
     }
 
@@ -251,7 +267,10 @@ fn scene_with_2d_first_plus_one_3d_layer() {
         scene.set_observer(observer);
         sync(d, scene);
         observer = scene.take_observer().unwrap();
-        prepare(d, scene, &observer, pool);
+        update(&mut d.components, scene, &observer,
+            d.layer2d_key, &mut d.opaque_list_2d, &mut d.alpha_list_2d,
+            d.layer3d_key, d.camera_3d_properties, &mut d.opaque_list_3d, &mut d.alpha_list_3d,
+            pool);
         render(d, scene);
         d.frame_count += 1;
     }

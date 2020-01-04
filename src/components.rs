@@ -660,6 +660,41 @@ fn update_inherited_opacities<ObserverT>(
     opacities
 }
 
+pub fn update_inherited_properties<ObserverT>(
+    components: &mut RSGComponentContainer,
+    scene: &RSGScene<RSGComponentLinks, ObserverT>,
+    dirty_world_roots: &[RSGNodeKey],
+    dirty_opacity_roots: &[RSGNodeKey],
+    pool: &scoped_pool::Pool)
+    where ObserverT: RSGObserver + Sync
+{
+    pool.scoped(|scope| {
+        let (transform_tx, transform_rx) = std::sync::mpsc::channel();
+        if !dirty_world_roots.is_empty() {
+            let transforms = std::mem::replace(&mut components.transforms, Default::default());
+            scope.execute(move || {
+                transform_tx.send(update_world_transforms(transforms, scene, dirty_world_roots)).unwrap();
+            });
+        }
+
+        let (opacity_tx, opacity_rx) = std::sync::mpsc::channel();
+        if !dirty_opacity_roots.is_empty() {
+            let opacities = std::mem::replace(&mut components.opacities, Default::default());
+            scope.execute(move || {
+                opacity_tx.send(update_inherited_opacities(opacities, scene, dirty_opacity_roots)).unwrap();
+            });
+        }
+
+        if !dirty_world_roots.is_empty() {
+            components.transforms = transform_rx.recv().unwrap();
+        }
+
+        if !dirty_opacity_roots.is_empty() {
+            components.opacities = opacity_rx.recv().unwrap();
+        }
+    });
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RSGOrthographicProjection {
     pub xmag: f32,
@@ -732,92 +767,57 @@ fn calculate_sorting_distance(world_transform: &glm::Mat4, bounds: &RSGAabb,
 
 pub type RSGRenderList = Vec<(RSGNodeKey, f32)>;
 
-pub fn build_render_lists<ObserverT>(
-    components: &mut RSGComponentContainer,
+pub fn build_layer_render_lists<ObserverT>(
+    components: &RSGComponentContainer,
     scene: &RSGScene<RSGComponentLinks, ObserverT>,
-    start_node_key: RSGNodeKey,
+    layer_node_key: RSGNodeKey,
     camera_properties_3d: Option<RSGCameraWorldTransformDerivedProperties>,
-    dirty_world_roots: &[RSGNodeKey],
-    dirty_opacity_roots: &[RSGNodeKey],
     opaque_list: &mut RSGRenderList,
-    alpha_list: &mut RSGRenderList,
-    pool: &scoped_pool::Pool)
-    where ObserverT: RSGObserver + Sync
+    alpha_list: &mut RSGRenderList)
+    where ObserverT: RSGObserver
 {
-    pool.scoped(|scope| {
-        let (opacity_tx, opacity_rx) = std::sync::mpsc::channel();
-        let mut update_opacities = !dirty_opacity_roots.is_empty();
-        if update_opacities {
-            let opacities = std::mem::replace(&mut components.opacities, Default::default());
-            scope.execute(move || {
-                opacity_tx.send(update_inherited_opacities(opacities, scene, dirty_opacity_roots)).unwrap();
-            });
+    opaque_list.clear();
+    alpha_list.clear();
+
+    let mut stacking_order_2d = 0;
+    for (key, _) in scene.traverse(layer_node_key) {
+        let links = scene.get_component_links(key);
+        if key == layer_node_key {
+            assert!(links.layer_key.is_some());
         }
-
-        let (transform_tx, transform_rx) = std::sync::mpsc::channel();
-        let mut update_transforms = !dirty_world_roots.is_empty();
-        if update_transforms {
-            let transforms = std::mem::replace(&mut components.transforms, Default::default());
-            scope.execute(move || {
-                transform_tx.send(update_world_transforms(transforms, scene, dirty_world_roots)).unwrap();
-            });
-        }
-
-        opaque_list.clear();
-        alpha_list.clear();
-
-        let mut stacking_order_2d = 0;
-        for (key, _) in scene.traverse(start_node_key) {
-            let links = scene.get_component_links(key);
-            if let Some(mesh_key) = links.mesh_key {
-                let mesh_data = components.mesh_data.get(mesh_key).unwrap();
-                if update_opacities {
-                    components.opacities = opacity_rx.recv().unwrap();
-                    update_opacities = false;
-                }
-                if let Some(cam_props) = camera_properties_3d {
-                    if update_transforms {
-                        components.transforms = transform_rx.recv().unwrap();
-                        update_transforms = false;
-                    }
-                    let sort_dist = calculate_sorting_distance(
-                        &components.transforms[links.transform_key.unwrap()].world_transform,
-                        &mesh_data.bounds_3d.unwrap(),
-                        &cam_props);
-                    if components.is_opaque(links) {
-                        // front to back
-                        let pos = opaque_list.binary_search_by(|e| e.1.partial_cmp(&sort_dist).unwrap()).unwrap_or_else(|i| i);
-                        opaque_list.insert(pos, (key, sort_dist));
-                    } else {
-                        // back to front
-                        let pos = alpha_list.binary_search_by(|e| sort_dist.partial_cmp(&e.1).unwrap()).unwrap_or_else(|i| i);
-                        alpha_list.insert(pos, (key, sort_dist));
-                    }
+        if let Some(mesh_key) = links.mesh_key {
+            let mesh_data = components.mesh_data.get(mesh_key).unwrap();
+            if let Some(cam_props) = camera_properties_3d {
+                let sort_dist = calculate_sorting_distance(
+                    &components.transforms[links.transform_key.unwrap()].world_transform,
+                    &mesh_data.bounds_3d.unwrap(),
+                    &cam_props);
+                if components.is_opaque(links) {
+                    // front to back
+                    let pos = opaque_list.binary_search_by(|e| e.1.partial_cmp(&sort_dist).unwrap()).unwrap_or_else(|i| i);
+                    opaque_list.insert(pos, (key, sort_dist));
                 } else {
-                    if components.is_opaque(links) {
-                        opaque_list.push((key, stacking_order_2d as f32));
-                    } else {
-                        // tree order is back to front
-                        alpha_list.push((key, stacking_order_2d as f32));
-                    }
-                    stacking_order_2d += 1;
+                    // back to front
+                    let pos = alpha_list.binary_search_by(|e| sort_dist.partial_cmp(&e.1).unwrap()).unwrap_or_else(|i| i);
+                    alpha_list.insert(pos, (key, sort_dist));
                 }
+            } else {
+                if components.is_opaque(links) {
+                    opaque_list.push((key, stacking_order_2d as f32));
+                } else {
+                    // tree order is back to front
+                    alpha_list.push((key, stacking_order_2d as f32));
+                }
+                stacking_order_2d += 1;
             }
-            if links.layer_key.is_some() && key != start_node_key {
-                break;
-            }
         }
+        if links.layer_key.is_some() && key != layer_node_key {
+            break;
+        }
+    }
 
-        if camera_properties_3d.is_none() {
-            // tree order was back to front, so reverse to get front to back
-            opaque_list.reverse();
-        }
-
-        if update_opacities {
-            components.opacities = opacity_rx.recv().unwrap();
-        }
-        if update_transforms {
-            components.transforms = transform_rx.recv().unwrap();
-        }
-    });
+    if camera_properties_3d.is_none() {
+        // tree order was back to front, so reverse to get front to back
+        opaque_list.reverse();
+    }
 }
