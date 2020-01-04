@@ -1,4 +1,4 @@
-use rsg::scene::{RSGNode, RSGScene, RSGEvent, RSGObserver, RSGSubtreeAddTransaction};
+use rsg::scene::{RSGNode, RSGScene, RSGEvent, RSGObserver, RSGSubtreeAddTransaction, RSGSubtreeBuilder};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 struct TestCompLinks {
@@ -143,6 +143,59 @@ fn append_subtree_and_observe() {
 }
 
 #[test]
+fn append_subtree_with_builder_and_observe() {
+    let mut scene = TestScene::new();
+    // ROOT
+    let root_key = scene.set_root(RSGNode::new());
+
+    scene.set_observer(TestObserver::new());
+    // ROOT(NODE1)
+    let node1_key = scene.append(root_key, RSGNode::new());
+    assert!(scene.is_valid(node1_key));
+
+    // ROOT(NODE1, NODE2(NODE21(NODE211), NODE22))
+    let subtree_keys = RSGSubtreeBuilder::new(&mut scene, root_key)
+    .append(RSGNode::new())
+    .append(RSGNode::new())
+    .append(RSGNode::new())
+    .append_to(0, RSGNode::new())
+    .commit();
+
+    assert!(subtree_keys.len() == 4);
+    let node2_key = subtree_keys[0];
+    let node21_key = subtree_keys[1];
+    let node211_key = subtree_keys[2];
+    let node22_key = subtree_keys[3];
+
+    assert!(scene.is_valid(node2_key));
+    assert!(scene.is_valid(node21_key));
+    assert!(scene.is_valid(node211_key));
+    assert!(scene.is_valid(node22_key));
+    assert!(scene.node_count() == 6);
+
+    let obs = scene.take_observer().unwrap();
+    assert!(obs.events.len() == 2);
+    if let RSGEvent::SubtreeAddedOrReattached(key) = obs.events[0] {
+        assert!(key == node1_key);
+    } else {
+        assert!(false);
+    }
+    if let RSGEvent::SubtreeAddedOrReattached(key) = obs.events[1] {
+        assert!(key == node2_key);
+    } else {
+        assert!(false);
+    }
+
+    // key, parent, first_child, last_child, prev_sibling, next_sibling
+    assert!(scene[root_key].links() == (Some(root_key), None, Some(node1_key), Some(node2_key), None, None));
+    assert!(scene[node1_key].links() == (Some(node1_key), Some(root_key), None, None, None, Some(node2_key)));
+    assert!(scene[node2_key].links() == (Some(node2_key), Some(root_key), Some(node21_key), Some(node22_key), Some(node1_key), None));
+    assert!(scene[node21_key].links() == (Some(node21_key), Some(node2_key), Some(node211_key), Some(node211_key), None, Some(node22_key)));
+    assert!(scene[node22_key].links() == (Some(node22_key), Some(node2_key), None, None, Some(node21_key), None));
+    assert!(scene[node211_key].links() == (Some(node211_key), Some(node21_key), None, None, None, None));
+}
+
+#[test]
 fn start_append_subtree_then_rollback() {
     let mut scene = TestScene::new();
     // ROOT
@@ -171,6 +224,37 @@ fn start_append_subtree_then_rollback() {
     assert!(!scene.is_valid(node21_key));
     assert!(!scene.is_valid(node211_key));
     assert!(!scene.is_valid(node22_key));
+
+    let obs = scene.take_observer().unwrap();
+    assert!(obs.events.len() == 1);
+    if let RSGEvent::SubtreeAddedOrReattached(key) = obs.events[0] {
+        assert!(key == node1_key);
+    } else {
+        assert!(false);
+    }
+}
+
+#[test]
+fn start_append_subtree_with_builder_then_rollback() {
+    let mut scene = TestScene::new();
+    // ROOT
+    let root_key = scene.set_root(RSGNode::new());
+
+    scene.set_observer(TestObserver::new());
+    // ROOT(NODE1)
+    let node1_key = scene.append(root_key, RSGNode::new());
+    assert!(scene.is_valid(node1_key));
+    assert!(scene.node_count() == 2);
+
+    // ROOT(NODE1, NODE2(NODE21(NODE211), NODE22))
+    RSGSubtreeBuilder::new(&mut scene, root_key)
+    .append(RSGNode::new())
+    .append(RSGNode::new())
+    .append(RSGNode::new())
+    .append_to(0, RSGNode::new())
+    .rollback();
+
+    assert!(scene.node_count() == 2);
 
     let obs = scene.take_observer().unwrap();
     assert!(obs.events.len() == 1);
@@ -220,7 +304,7 @@ fn prepend_and_observe() {
 }
 
 #[test]
-fn prepend_subtree_and_observe() {
+fn prepend_subtree_with_builder_and_observe() {
     let mut scene = TestScene::new();
     // ROOT
     let root_key = scene.set_root(RSGNode::new());
@@ -230,18 +314,19 @@ fn prepend_subtree_and_observe() {
     let node1_key = scene.append(root_key, RSGNode::new());
     assert!(scene.is_valid(node1_key));
 
-    let mut node2_t = RSGSubtreeAddTransaction::new();
-    let node2_key = scene.prepend_with_transaction(root_key, RSGNode::new(), &mut node2_t);
-    assert!(!scene.is_valid(node2_key));
-    let node21_key = scene.prepend_with_transaction(node2_key, RSGNode::new(), &mut node2_t);
-    assert!(!scene.is_valid(node21_key));
-    let node211_key = scene.prepend_with_transaction(node21_key, RSGNode::new(), &mut node2_t);
-    assert!(!scene.is_valid(node211_key));
-    let node22_key = scene.prepend_with_transaction(node2_key, RSGNode::new(), &mut node2_t);
-    assert!(!scene.is_valid(node22_key));
-
     // ROOT(NODE2(NODE22, NODE21(NODE211)), NODE1)
-    scene.commit(node2_t);
+    let subtree_keys = RSGSubtreeBuilder::new(&mut scene, root_key)
+    .prepend(RSGNode::new())
+    .prepend(RSGNode::new())
+    .prepend(RSGNode::new())
+    .prepend_to(0, RSGNode::new())
+    .commit();
+
+    assert!(subtree_keys.len() == 4);
+    let node2_key = subtree_keys[0];
+    let node21_key = subtree_keys[1];
+    let node211_key = subtree_keys[2];
+    let node22_key = subtree_keys[3];
 
     assert!(scene.is_valid(node2_key));
     assert!(scene.is_valid(node21_key));

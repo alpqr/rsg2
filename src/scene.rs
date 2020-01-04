@@ -629,3 +629,60 @@ impl<CompLinksT, ObserverT> std::ops::IndexMut<RSGNodeKey> for RSGScene<CompLink
         self.arena.get_mut(node_key).unwrap()
     }
 }
+
+pub type RSGSubtreeKeys = smallvec::SmallVec<[RSGNodeKey; 64]>;
+
+pub struct RSGSubtreeBuilder<'a, CompLinksT, ObserverT> where CompLinksT: Copy {
+    scene: &'a mut RSGScene<CompLinksT, ObserverT>,
+    transaction: Option<RSGSubtreeAddTransaction>,
+    initial_parent_key: RSGNodeKey,
+    node_keys: RSGSubtreeKeys
+}
+
+impl<'a, CompLinksT, ObserverT> RSGSubtreeBuilder<'a, CompLinksT, ObserverT>
+    where CompLinksT: Default + Copy, ObserverT: RSGObserver
+{
+    pub fn new(scene: &'a mut RSGScene<CompLinksT, ObserverT>, parent_key: RSGNodeKey) -> Self {
+        RSGSubtreeBuilder {
+            scene: scene,
+            transaction: Some(RSGSubtreeAddTransaction::new()),
+            initial_parent_key: parent_key,
+            node_keys: smallvec::smallvec![]
+        }
+    }
+
+    pub fn append(&mut self, node: RSGNode<CompLinksT>) -> &mut Self {
+        let parent_key = self.node_keys.last().unwrap_or(&self.initial_parent_key);
+        let node_key = self.scene.append_with_transaction(*parent_key, node, self.transaction.as_mut().unwrap());
+        self.node_keys.push(node_key);
+        self
+    }
+
+    pub fn append_to(&mut self, parent_idx: usize, node: RSGNode<CompLinksT>) -> &mut Self {
+        let parent_key = self.node_keys[parent_idx];
+        self.node_keys.push(self.scene.append_with_transaction(parent_key, node, self.transaction.as_mut().unwrap()));
+        self
+    }
+
+    pub fn prepend(&mut self, node: RSGNode<CompLinksT>) -> &mut Self {
+        let parent_key = self.node_keys.last().unwrap_or(&self.initial_parent_key);
+        let node_key = self.scene.prepend_with_transaction(*parent_key, node, self.transaction.as_mut().unwrap());
+        self.node_keys.push(node_key);
+        self
+    }
+
+    pub fn prepend_to(&mut self, parent_idx: usize, node: RSGNode<CompLinksT>) -> &mut Self {
+        let parent_key = self.node_keys[parent_idx];
+        self.node_keys.push(self.scene.prepend_with_transaction(parent_key, node, self.transaction.as_mut().unwrap()));
+        self
+    }
+
+    pub fn commit(&mut self) -> RSGSubtreeKeys {
+        self.scene.commit(self.transaction.take().unwrap());
+        std::mem::replace(&mut self.node_keys, Default::default())
+    }
+
+    pub fn rollback(&mut self) {
+        self.scene.rollback(self.transaction.take().unwrap());
+    }
+}

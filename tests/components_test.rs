@@ -159,44 +159,36 @@ fn scene_with_2d_first_plus_one_3d_layer() {
     fn sync(d: &mut Data, scene: &mut Scene) {
         println!("Frame {} sync", d.frame_count);
         if d.frame_count == 0 {
-            let mut transaction = RSGSubtreeAddTransaction::new();
+            // root(layer(tri1(tri2(tri3), tri_alpha1(tri_alpha2))))
+            let subtree_keys = RSGSubtreeBuilder::new(scene, d.root_key)
+            .append(RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()))
             // 2D, opaque
-            d.layer2d_key = scene.append_with_transaction(d.root_key,
-                RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()),
-                &mut transaction);
-            d.tri1_key = scene.append_with_transaction(d.layer2d_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
-                &mut transaction);
-            d.tri2_key = scene.append_with_transaction(d.tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(10.0, 20.0, 0.0)), 1.0),
-                &mut transaction);
-            d.tri3_key = scene.append_with_transaction(d.tri2_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(-5.0, 0.0, 0.0)), 1.0),
-                &mut transaction);
+            .append(make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0))
+            .append(make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(10.0, 20.0, 0.0)), 1.0))
+            .append(make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(-5.0, 0.0, 0.0)), 1.0))
             // 2D, alpha
-            d.tri_alpha1_key = scene.append_with_transaction(d.tri1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(25.0, 32.0, 0.0)), 0.8),
-                &mut transaction);
-            d.tri_alpha2_key = scene.append_with_transaction(d.tri_alpha1_key, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0),
-                &mut transaction);
-            // throw in some 3D stuff
-            d.layer3d_key = scene.append_with_transaction(d.tri_alpha1_key,
-                RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()),
-                &mut transaction);
-            d.tri_3d1_key = scene.append_with_transaction(d.layer3d_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(0.0, 0.0, -1.0)), 1.0),
-                &mut transaction);
-            d.tri_3d2_key = scene.append_with_transaction(d.tri_3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(0.5, 0.5, -5.0)), 1.0),
-                &mut transaction);
-            d.tri_3d_alpha1_key = scene.append_with_transaction(d.tri_3d1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(-1.5, 0.0, -2.0)), 0.5),
-                &mut transaction);
-            d.tri_3d_alpha2_key = scene.append_with_transaction(d.tri_3d_alpha1_key, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets,
-                glm::translation(&glm::vec3(0.0, 1.0, 1.0)), 0.2),
-                &mut transaction);
-            scene.commit(transaction);
+            .append_to(1, make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(25.0, 32.0, 0.0)), 0.8))
+            .append(make_2d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(50.0, 100.0, 0.0)), 1.0))
+            // ... tri_alpha1(tri_alpha2, layer(tri_3d1(tri_3d2, tri_3d_alpha1(tri_3d_alpha2))))
+            // 3D, opaque
+            .append_to(4, RSGNode::with_component_links(RSGComponentBuilder::new(&mut d.components).layer().links()))
+            .append(make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(0.0, 0.0, -1.0)), 1.0))
+            .append(make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(0.5, 0.5, -5.0)), 1.0))
+            // 3D, alpha
+            .append_to(7, make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(-1.5, 0.0, -2.0)), 0.5))
+            .append(make_3d_triangle(&mut d.components, &mut d.mesh_buffers, &mut d.shader_sets, glm::translation(&glm::vec3(0.0, 1.0, 1.0)), 0.2))
+            .commit();
+            d.layer2d_key = subtree_keys[0];
+            d.tri1_key = subtree_keys[1];
+            d.tri2_key = subtree_keys[2];
+            d.tri3_key = subtree_keys[3];
+            d.tri_alpha1_key = subtree_keys[4];
+            d.tri_alpha2_key = subtree_keys[5];
+            d.layer3d_key = subtree_keys[6];
+            d.tri_3d1_key = subtree_keys[7];
+            d.tri_3d2_key = subtree_keys[8];
+            d.tri_3d_alpha1_key = subtree_keys[9];
+            d.tri_3d_alpha2_key = subtree_keys[10];
 
             d.camera_3d = RSGCamera::Perspective(RSGPerspectiveProjection {
                 aspect_ratio: 1.777,
